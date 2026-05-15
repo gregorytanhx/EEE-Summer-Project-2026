@@ -1,0 +1,20 @@
+
+# Arduino build artifacts
+build/
+*.hex
+*.elf
+*.bin
+
+# IDE settings
+.vscode/
+.vs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*~
+EOF
