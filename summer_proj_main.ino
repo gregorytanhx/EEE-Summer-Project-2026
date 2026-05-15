@@ -1,13 +1,13 @@
 
-#define USE_HOTSPOT
+// #define USE_HOTSPOT
 #define USE_WIFI_NINA false
 #define USE_WIFI101 true
 #include <WiFiWebServer.h>
 
-#define LEFT_DIR 0
-#define LEFT_PWM 1
-#define RIGHT_DIR 2
-#define RIGHT_PWM 3
+#define LEFT_DIR 8
+#define LEFT_PWM 9
+#define RIGHT_DIR 3
+#define RIGHT_PWM 4
 
 #ifdef USE_HOTSPOT
 const int groupNumber = 0;
@@ -192,7 +192,7 @@ const char webpage[] PROGMEM = R"rawliteral(
         <span class="label">Throttle</span>
         <span id="speed_val">255</span>
       </div>
-      <input type="range" id="speed_slider" min="0" max="255" value="255">
+      <input type="range" id="speed_slider" min="80" max="255" value="255">
     </div>
 
   <script>
@@ -217,7 +217,7 @@ const char webpage[] PROGMEM = R"rawliteral(
     switch (e.key.toLowerCase()) {
       case "w": forward(); setKey("w", true); break;
       case "a": left();    setKey("a", true); break;
-      case "s": reverse(); setKey("s", true); break;
+      case "s": back(); setKey("s", true); break;
       case "d": right();   setKey("d", true); break;
     }
   });
@@ -244,7 +244,7 @@ const char webpage[] PROGMEM = R"rawliteral(
   function ledOn()  { send("/on", "led_state"); }
   function ledOff() { send("/off", "led_state"); }
   function forward() { send("/forward", "move_state"); }
-  function reverse() { send("/reverse", "move_state"); }
+  function back() { send("/back", "move_state"); }
   function left()    { send("/left", "move_state"); }
   function right()   { send("/right", "move_state"); }
   function stop()    { send("/stop", "move_state"); }
@@ -275,6 +275,16 @@ void handleRoot() {
   }
 }
 
+void handleSpeed() {
+  if (server.hasArg("value")) {
+    int newSpeed = server.arg("value").toInt();
+    if (newSpeed < 0) newSpeed = 0;
+    if (newSpeed > 255) newSpeed = 255;
+    speed = newSpeed;
+  }
+  server.send(200, F("text/plain"), String(speed));
+}
+
 //Switch LED on and acknowledge
 void ledON() {
   digitalWrite(LED_BUILTIN, 1);
@@ -288,12 +298,13 @@ void ledOFF() {
 }
 
 
-void reverse() {
+void back() {
   digitalWrite(LEFT_DIR, LOW);
   analogWrite(LEFT_PWM, speed);
   digitalWrite(RIGHT_DIR, LOW);
   analogWrite(RIGHT_PWM, speed);
-  server.send(200, F("text/plain"), F("REVERSE"));
+  Serial.println("BACK");
+  server.send(200, F("text/plain"), F("back"));
 }
 
 
@@ -302,6 +313,7 @@ void forward() {
   analogWrite(LEFT_PWM, speed);
   digitalWrite(RIGHT_DIR, HIGH);
   analogWrite(RIGHT_PWM, speed);
+  Serial.println("forward");
   server.send(200, F("text/plain"), F("FORWARD"));
 }
 
@@ -311,6 +323,7 @@ void right() {
   analogWrite(LEFT_PWM, speed);
   digitalWrite(RIGHT_DIR, HIGH);
   analogWrite(RIGHT_PWM, speed);
+  Serial.println("right");
   server.send(200, F("text/plain"), F("RIGHT"));
 }
 
@@ -320,12 +333,14 @@ void left() {
   analogWrite(LEFT_PWM, speed);
   digitalWrite(RIGHT_DIR, LOW);
   analogWrite(RIGHT_PWM, speed);
+  Serial.println("left");
   server.send(200, F("text/plain"), F("LEFT"));
 }
 
 void stop() {
   analogWrite(LEFT_PWM, 0);
   analogWrite(RIGHT_PWM, 0);
+  Serial.println("stop");
   server.send(200, F("text/plain"), F("STOP"));
 }
 
@@ -349,6 +364,11 @@ void handleNotFound() {
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, 0);
+  pinMode(LEFT_DIR, OUTPUT);
+  pinMode(LEFT_PWM, OUTPUT);
+  pinMode(RIGHT_DIR, OUTPUT);
+  pinMode(RIGHT_PWM, OUTPUT);
+  
 
   Serial.begin(9600);
 
@@ -387,8 +407,9 @@ void setup() {
   server.on(F("/forward"), forward);
   server.on(F("/left"), left);
   server.on(F("/right"), right);
-  server.on(F("/reverse"), reverse);
+  server.on(F("/back"), back);
   server.on(F("/stop"), stop);
+  server.on(F("/speed"), handleSpeed);
 
 
 
