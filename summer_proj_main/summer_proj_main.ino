@@ -8,14 +8,13 @@
 #define RIGHT_DIR 3
 #define RIGHT_PWM 4
 #define IR_INPUT 2
-#define ULTRA_INPUT A0
-#define MAG_INPUT A1
 
+#define ULTRA_SWITCH 7
 
 #define ULTRA_THRES 20
 
-#define MAG_THRES 20
-#define MAG_STABLE_VAL 780
+#define MAG_THRES 15
+#define MAG_STABLE_VAL 528
 
 #define right_speed_modifier 0.9
 
@@ -38,12 +37,12 @@ int twoinputspeed = speed;   // inner-wheel speed for diagonal turns (set by tur
 
 // ─── Sensor data ───
 volatile int IRPulseCount = 0;   // volatile: modified inside the interrupt
-const int IRSampleTime = 100;    // measurement window in ms
+const int IRSampleTime = 300;    // measurement window in ms
 long lastIRTime = 0;
 float IRPulseRate = 300;
 bool ultraDetected = false;
 int ultraReading;
-const int ultraSampleTime = 300;
+const int ultraSampleTime = 500;
 int ultraMin = 1023;
 int ultraMax = 0;
 int magReading;
@@ -55,8 +54,30 @@ long total = 0;
 
 
 int magDir = 0; // 1 = up, -1 = down, 0 = no magnet;
-int rockAge = 0;
+String rockAge = "0.00";
 long lastUltraTime = 0;
+
+long lastRockTime = 0;
+
+// ─── Radio toggle ───
+// When false, updateRadio() is completely skipped in loop().
+// This prevents readByte(2000) from blocking the web server for 2 seconds.
+bool radioEnabled = false;
+
+const int RX_PIN = 0;
+const long BAUD = 600;
+const long BIT_PERIOD_US = 1000000L / BAUD;   // 1667 µs per bit at 600 baud
+const long HALF_BIT_US   = BIT_PERIOD_US / 2; // 833 µs
+
+// Line idles LOW on wire (inverted from standard UART)
+// Set to false if your hardware idles HIGH instead
+const bool INVERTED = true;
+
+char buf[5];                       // 4 chars + null terminator
+int idx = 0;
+bool framed = false;
+unsigned long lastByteTime = 0;
+
 
 //Webpage to return when root is requested
 const char webpage[] PROGMEM = R"rawliteral(
@@ -302,6 +323,49 @@ const char webpage[] PROGMEM = R"rawliteral(
         font-weight: 700;
         letter-spacing: 0.1em;
       }
+
+      /* ─── Radio toggle button ─── */
+      /* OFF state: dull border, grey text */
+      #radio_toggle {
+        background: transparent;
+        border: 1px solid #333;
+        color: #888;
+        font-family: monospace;
+        padding: 12px 24px;
+        font-size: 12px;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        cursor: pointer;
+        margin: 0 0 16px 0;
+        width: 100%;
+        text-align: left;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      /* ON state: amber border and text to match the UI accent colour */
+      #radio_toggle.on {
+        border-color: #ffb547;
+        color: #ffb547;
+      }
+      #radio_toggle .radio-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #333;
+        display: inline-block;
+      }
+      #radio_toggle.on .radio-dot {
+        background: #ffb547;
+        /* Pulsing glow so you can tell it's actively listening */
+        box-shadow: 0 0 6px #ffb547;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.3; }
+      }
+
       @media (max-width: 600px) {
         .layout {
           grid-template-columns: 1fr;
@@ -356,6 +420,15 @@ const char webpage[] PROGMEM = R"rawliteral(
 
       <div class="column">
         <div class="section-header">Sensor Data</div>
+
+        <!-- ─── Radio toggle ─── -->
+        <!-- Clicking this button sends GET /radiotoggle to the Arduino.   -->
+        <!-- The Arduino flips its radioEnabled flag and replies "1" or "0" -->
+        <!-- so the button can update its own appearance to match.          -->
+        <button id="radio_toggle" onclick="toggleRadio()">
+          <span>Radio Receiver</span>
+          <span class="radio-dot"></span>
+        </button>
 
         <div id="rock_card" class="rock-card unknown">
           <div class="rock-label">Identified As</div>
@@ -494,13 +567,14 @@ const char webpage[] PROGMEM = R"rawliteral(
           }
 
           const magEl = document.getElementById("mag_val");
-          if (data.mag > 0) {
-            magEl.innerText = "\u2191 UP";
-          } else {
-            magEl.innerText = "\u2193 DOWN";
-          }
+          magEl.innerText = data.mag;
+          // if (data.mag > 0) {
+          //   magEl.innerText = "\u2191 UP";
+          // } else {
+          //   magEl.innerText = "\u2193 DOWN";
+          // }
 
-          document.getElementById("age_val").innerText = (data.age / 100).toFixed(2);
+          document.getElementById("age_val").innerText = data.age;
 
           const rockCard = document.getElementById("rock_card");
           const rockName = document.getElementById("rock_name");
@@ -517,6 +591,24 @@ const char webpage[] PROGMEM = R"rawliteral(
 
   function ledOn()  { send("/on", "led_state"); }
   function ledOff() { send("/off", "led_state"); }
+
+  // ─── Radio toggle ───
+  // Sends GET /radiotoggle to the Arduino.
+  // Arduino flips the flag and replies "1" (now on) or "0" (now off).
+  // We use that reply to keep the button appearance in sync with reality —
+  // even if the page was reloaded mid-session the button is always correct.
+  function toggleRadio() {
+    const btn = document.getElementById("radio_toggle");
+    const xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        const on = (this.responseText.trim() === "1");
+        btn.classList.toggle("on", on);
+      }
+    };
+    xhttp.open("GET", "/radiotoggle", true);
+    xhttp.send();
+  }
   </script>
   </body>
 </html>
@@ -544,6 +636,8 @@ void handleRoot() {
     sent += toSend;
   }
 }
+
+
 
 void handleSpeed() {
   if (server.hasArg("value")) {
@@ -672,23 +766,34 @@ const char* classifyRock() {
   bool ir547 = (IRPulseRate > 400);    // true if IR is in 547 group
 
   // Match against the table
-  if ( ir547 && magDir == -1 &&  ultraDetected) return "basaltoid";
-  if (!ir547 && magDir == -1 && !ultraDetected) return "gravion";
-  if (!ir547 && magDir == 1 &&  ultraDetected) return "regolix";
-  if ( ir547 && magDir == 1 && !ultraDetected) return "lunarite";
+  if ( ir547 && magDir == -1 || magDir == -1 &&  ultraDetected || ir547 && ultraDetected) return "basaltoid";
+  if (!ir547 && magDir == -1 || magDir == -1 && !ultraDetected || !ir547 && !ultraDetected) return "gravion";
+  if (!ir547 && magDir == 1 || magDir == 1 &&  ultraDetected || !ir547 && ultraDetected) return "regolix";
+  if ( ir547 && magDir == 1 || magDir == 1 && !ultraDetected || ir547 && !ultraDetected) return "lunarite";
   return "unknown";
 }
 
 void sendData() {
   String json = "{";
   json += "\"ir\":"    + String(IRPulseRate, 1) + ",";
-  json += "\"mag\":"   + String(magDir)          + ",";   // ← was magReading
+  json += "\"mag\":"   + String(magReading)          + ",";   // ← was magReading
   json += "\"us\":"    + String(ultraDetected ? 1 : 0) + ",";  // ← bool not ADC
   json += "\"rock\":\"" + String(classifyRock()) + "\",";
-  json += "\"age\":"   + String(rockAge);
+  json += "\"age\":"   + rockAge;
   json += "}";
   Serial.println(json);
   server.send(200, F("application/json"), json);
+}
+
+// ─── Radio toggle handler ───
+// Called when the web UI hits GET /radiotoggle.
+// Flips the radioEnabled flag, then replies "1" (enabled) or "0" (disabled).
+// The web UI uses this reply to keep the button appearance in sync.
+void handleRadioToggle() {
+  radioEnabled = !radioEnabled;
+  Serial.print(F("Radio "));
+  Serial.println(radioEnabled ? F("ENABLED") : F("DISABLED"));
+  server.send(200, F("text/plain"), radioEnabled ? F("1") : F("0"));
 }
 
 //Generate a 404 response with details of the failed request
@@ -711,6 +816,47 @@ void pulseDetected() {
   IRPulseCount++;
 }
 
+
+
+// Returns the LOGICAL state of the line: TRUE = idle, FALSE = active/start
+inline bool lineIsIdle() {
+  bool raw = digitalRead(RX_PIN);
+  if (INVERTED) raw = !raw;
+  return raw;
+}
+
+
+// Wait for a start bit, then sample 8 data bits. Returns the byte, or -1 on timeout.
+int readByte(unsigned long timeout_ms) {
+  unsigned long deadline = millis() + timeout_ms;
+  
+  // Ensure line is currently idle (don't jump into the middle of a byte)
+  while (!lineIsIdle()) {
+    if (millis() > deadline) return -1;
+  }
+  
+  // Wait for line to go active (start bit)
+  while (lineIsIdle()) {
+    if (millis() > deadline) return -1;
+  }
+  
+  // Land in middle of start bit and verify still active
+  delayMicroseconds(HALF_BIT_US);
+  if (lineIsIdle()) return -1;
+  
+  // Sample 8 data bits, LSB first
+  byte b = 0;
+  for (int i = 0; i < 8; i++) {
+    delayMicroseconds(BIT_PERIOD_US);
+    if (lineIsIdle()) b |= (1 << i);   // logical 1 = idle level
+  }
+  
+  // Wait through stop bit (not verified — start bit of next frame re-syncs)
+  delayMicroseconds(BIT_PERIOD_US);
+  
+  return b;
+}
+
 void updateIR() {
   int elapsedTime = millis() - lastIRTime;
   if (elapsedTime > IRSampleTime) {
@@ -722,47 +868,40 @@ void updateIR() {
 
     // pulses per second (×1000 because elapsedTime is in ms)
     IRPulseRate = (float) count * 1000.0 / (float) elapsedTime;
+    // if (IRPulseRate > 1000) IRPulseRate = 0; // reject out of bounds values
     lastIRTime = millis();
   }
+
+  
+  // Serial.print("IR: ");
   // Serial.println(IRPulseRate);
 }
-
 void updateUltra() {
-  // use moving average for ultrasonic
-  
-  ultraReading = analogRead(A1);
   int elapsedTime = millis() - lastUltraTime;
+  ultraReading = analogRead(A1);
   if (elapsedTime > ultraSampleTime) {
     lastUltraTime = millis();
+
+
+
     if (abs(ultraMax - ultraMin) > ULTRA_THRES) {
       ultraDetected = true;
     } else {
       ultraDetected = false;
     }
-
     ultraMin = 1023;
     ultraMax = 0;
   }
 
-  if (ultraReading > ultraMax) {
-    ultraMax = ultraReading;
-  }
+  if (ultraReading > ultraMax) ultraMax = ultraReading;
+  if (ultraReading < ultraMin) ultraMin = ultraReading;
 
-  if (ultraReading < ultraMin) {
-    ultraMin = ultraReading;
-  }
-
-  Serial.print("ultraMax: ");
-  Serial.print(ultraMax);
-  Serial.print("\tultraMin: ");
-  Serial.println(ultraMin);
 }
 
-
 void updateMag() {
-  magReading = analogRead(A0);
-  // Serial.print("mag: ");
-  // Serial.println(magReading);
+  magReading = analogRead(A0) - MAG_STABLE_VAL;
+  Serial.print("mag: ");
+  Serial.println(analogRead(A0));
   if (magReading > MAG_THRES) {
     magDir = 1;
   } else if (magReading < -MAG_THRES) {
@@ -773,7 +912,60 @@ void updateMag() {
 
 }
 
+void updateRadio() {
+  // Wait for idle, then for a start bit
+  unsigned long idleWait = millis() + 5;
+  while (!lineIsIdle()) {
+    if (millis() > idleWait) return;
+  }
+
+  unsigned long startWait = millis() + 50;
+  while (lineIsIdle()) {
+    if (millis() > startWait) return;
+  }
+
+  // Read one byte inline
+  delayMicroseconds(HALF_BIT_US);
+  if (lineIsIdle()) return;
+
+  byte b = 0;
+  for (int i = 0; i < 8; i++) {
+    delayMicroseconds(BIT_PERIOD_US);
+    if (lineIsIdle()) b |= (1 << i);
+  }
+  delayMicroseconds(BIT_PERIOD_US);  // stop bit
+
+  // If it's not '#', not interested
+  if ((char)b != '#') return;
+
+  // It IS '#' — read remaining 3 bytes immediately
+  int x = readByte(200);
+  int y = readByte(200);
+  int z = readByte(200);
+
+  if (x < 0 || y < 0 || z < 0) {
+    Serial.println("(timeout mid-frame)");
+    return;
+  }
+
+  if (isDigit(x) && isDigit(y) && isDigit(z)) {
+    String tmp = String((char)x);
+    tmp += ".";
+    tmp += String((char)y);
+    tmp += String((char)z);
+    rockAge = tmp;
+    Serial.print("Rock age = ");
+    Serial.print(rockAge);
+    Serial.println(" billion years");
+  } else {
+    Serial.println("(frame error)");
+  }
+}
+
+
+
 void setup() {
+  pinMode(ULTRA_SWITCH, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, 0);
 
@@ -782,13 +974,15 @@ void setup() {
   pinMode(RIGHT_DIR, OUTPUT);
   pinMode(RIGHT_PWM, OUTPUT);
 
+
+  pinMode(RX_PIN, INPUT);
+
   pinMode(IR_INPUT, INPUT);
   attachInterrupt(digitalPinToInterrupt(IR_INPUT),
                   pulseDetected,
                   RISING);
 
   Serial.begin(115200);
-  Serial1.begin(600);
 
   //Wait 10s for the serial connection before proceeding
   //This ensures you can see messages from startup() on the monitor
@@ -829,6 +1023,7 @@ void setup() {
   server.on(F("/stop"), stop);
   server.on(F("/speed"), handleSpeed);
   server.on(F("/sensordata"), sendData);
+  server.on(F("/radiotoggle"), handleRadioToggle);   // ← new
 
   //2-input callbacks
   server.on(F("/turnratio"), turnratio);
@@ -848,9 +1043,22 @@ void setup() {
 
 //Call the server polling function in the main loop
 void loop() {
-  server.handleClient();
+  // Drain all pending web requests for up to 20ms before doing anything else
+  unsigned long serveUntil = millis() + 20;
+  while (millis() < serveUntil) {
+    server.handleClient();
+  }
+
   updateIR();
-  updateMag();
+  // delay(100);
   updateUltra();
-  
+  updateMag();
+
+
+
+  if (radioEnabled) {
+    updateRadio();
+  }
+
+
 }

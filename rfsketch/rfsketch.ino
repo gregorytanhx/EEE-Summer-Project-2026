@@ -72,6 +72,7 @@ void setup() {
   
   pinMode(RX_PIN, INPUT);
   
+  
   Serial.println("==============================================");
   Serial.print("  Rock radio receiver — ");
   Serial.print(BAUD);
@@ -81,53 +82,3 @@ void setup() {
   Serial.println("  Waiting for transmission (#XYZ format)...");
   Serial.println("==============================================");
 }
-
-void loop() {
-  int b = readByte(2000);
-  
-  if (b < 0) {
-    Serial.print(".");
-    return;
-  }
-  
-  // Print raw byte (helpful for diagnostics; comment out if you only want age lines)
-  Serial.print("[0x");
-  if (b < 0x10) Serial.print('0');
-  Serial.print(b, HEX);
-  Serial.print(" '");
-  if (b >= 32 && b < 127) Serial.print((char)b);
-  else Serial.print('?');
-  Serial.print("'] ");
-  
-  char c = (char)b;
-  lastByteTime = millis();
-  
-  // Frame starts with '#'
-  if (c == '#') {
-    idx = 0;
-    framed = true;
-  }
-  
-  if (framed && idx < 4) {
-    buf[idx++] = c;
-    
-    if (idx == 4) {
-      buf[4] = '\0';
-      
-      // Validate: '#' followed by three digits
-      if (buf[0] == '#' && isDigit(buf[1]) && isDigit(buf[2]) && isDigit(buf[3])) {
-        Serial.println();
-        Serial.print(">>> Rock age = ");
-        Serial.print(buf[1]);
-        Serial.print('.');
-        Serial.print(buf[2]);
-        Serial.print(buf[3]);
-        Serial.println(" billion years");
-      } else {
-        Serial.print("(frame error) ");
-      }
-      framed = false;
-    }
-  }
-}
-
