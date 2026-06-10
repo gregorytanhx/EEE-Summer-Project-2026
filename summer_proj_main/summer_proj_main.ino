@@ -567,12 +567,17 @@ const char webpage[] PROGMEM = R"rawliteral(
           }
 
           const magEl = document.getElementById("mag_val");
-          magEl.innerText = data.mag;
-          // if (data.mag > 0) {
-          //   magEl.innerText = "\u2191 UP";
-          // } else {
-          //   magEl.innerText = "\u2193 DOWN";
-          // }
+          
+          let tmp;
+          if (data.mag >= 15) {
+            tmp = "\u2191 UP";
+          } else if (data.mag <= -15) {
+            tmp = "\u2193 DOWN";
+          } else {
+            tmp = "NOT DETECTED"
+          }
+
+          magEl.innerText = String(data.mag) + "(" + tmp + ")";
 
           document.getElementById("age_val").innerText = data.age;
 
@@ -725,7 +730,7 @@ void forwardright() {
   digitalWrite(LEFT_DIR, HIGH);
   analogWrite(LEFT_PWM, speed);
   digitalWrite(RIGHT_DIR, HIGH);
-  analogWrite(RIGHT_PWM, twoinputspeed * right_speed_modifier);
+  analogWrite(RIGHT_PWM, twoinputspeed);
   Serial.println("forwardright");
   server.send(200, F("text/plain"), F("FORWARDRIGHT"));
 }
@@ -735,7 +740,7 @@ void forwardleft() {
   digitalWrite(LEFT_DIR, HIGH);
   analogWrite(LEFT_PWM, twoinputspeed);
   digitalWrite(RIGHT_DIR, HIGH);
-  analogWrite(RIGHT_PWM, speed * right_speed_modifier);
+  analogWrite(RIGHT_PWM, speed);
   Serial.println("forwardleft");
   server.send(200, F("text/plain"), F("FORWARDLEFT"));
 }
@@ -873,16 +878,17 @@ void updateIR() {
   }
 
   
-  // Serial.print("IR: ");
-  // Serial.println(IRPulseRate);
+  Serial.print("IR: ");
+  Serial.println(IRPulseRate);
 }
 void updateUltra() {
   int elapsedTime = millis() - lastUltraTime;
+  digitalWrite(ULTRA_SWITCH, HIGH);
+  delay(10);
   ultraReading = analogRead(A1);
+  digitalWrite(ULTRA_SWITCH, LOW);
   if (elapsedTime > ultraSampleTime) {
     lastUltraTime = millis();
-
-
 
     if (abs(ultraMax - ultraMin) > ULTRA_THRES) {
       ultraDetected = true;
