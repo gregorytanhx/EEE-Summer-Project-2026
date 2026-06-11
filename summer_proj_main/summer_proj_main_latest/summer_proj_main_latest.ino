@@ -61,9 +61,6 @@ long lastUltraTime = 0;
 
 long lastRockTime = 0;
 
-// ─── Radio toggle ───
-// When false, updateRadio() is completely skipped in loop().
-// This prevents readByte(2000) from blocking the web server for 2 seconds.
 bool radioEnabled = false;
 
 const int RX_PIN = 0;
@@ -71,11 +68,9 @@ const long BAUD = 600;
 const long BIT_PERIOD_US = 1000000L / BAUD;   // 1667 µs per bit at 600 baud
 const long HALF_BIT_US   = BIT_PERIOD_US / 2; // 833 µs
 
-// Line idles LOW on wire (inverted from standard UART)
-// Set to false if your hardware idles HIGH instead
 const bool INVERTED = true;
 
-char buf[5];                       // 4 chars + null terminator
+char buf[5];
 int idx = 0;
 bool framed = false;
 unsigned long lastByteTime = 0;
@@ -599,11 +594,7 @@ const char webpage[] PROGMEM = R"rawliteral(
   function ledOn()  { send("/on", "led_state"); }
   function ledOff() { send("/off", "led_state"); }
 
-  // ─── Radio toggle ───
-  // Sends GET /radiotoggle to the Arduino.
-  // Arduino flips the flag and replies "1" (now on) or "0" (now off).
-  // We use that reply to keep the button appearance in sync with reality —
-  // even if the page was reloaded mid-session the button is always correct.
+// Radio toggle
   function toggleRadio() {
     const btn = document.getElementById("radio_toggle");
     const xhttp = new XMLHttpRequest();
@@ -792,10 +783,7 @@ void sendData() {
   server.send(200, F("application/json"), json);
 }
 
-// ─── Radio toggle handler ───
-// Called when the web UI hits GET /radiotoggle.
-// Flips the radioEnabled flag, then replies "1" (enabled) or "0" (disabled).
-// The web UI uses this reply to keep the button appearance in sync.
+// Radio toggle handler
 void handleRadioToggle() {
   radioEnabled = !radioEnabled;
   Serial.print(F("Radio "));
@@ -993,8 +981,6 @@ void setup() {
   Serial.begin(115200);
 
   //Wait 10s for the serial connection before proceeding
-  //This ensures you can see messages from startup() on the monitor
-  //Remove this for faster startup when the USB host isn't attached
   while (!Serial && millis() < 10000)
     ;
 
@@ -1051,7 +1037,6 @@ void setup() {
 
 //Call the server polling function in the main loop
 void loop() {
-  // Drain all pending web requests for up to 20ms before doing anything else
   unsigned long serveUntil = millis() + 20;
   while (millis() < serveUntil) {
     server.handleClient();
