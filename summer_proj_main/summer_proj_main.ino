@@ -54,6 +54,7 @@ long total = 0;
 
 
 int magDir = 0; // 1 = up, -1 = down, 0 = no magnet;
+int IRstatus;
 String rockAge = "0.00";
 long lastUltraTime = 0;
 
@@ -726,55 +727,52 @@ void stop() {
 
 
 //2-input controls
-void forwardright() {
+void forwardleft() {
   digitalWrite(LEFT_DIR, HIGH);
   analogWrite(LEFT_PWM, speed);
   digitalWrite(RIGHT_DIR, HIGH);
   analogWrite(RIGHT_PWM, twoinputspeed);
   Serial.println("forwardright");
-  server.send(200, F("text/plain"), F("FORWARDRIGHT"));
+  server.send(200, F("text/plain"), F("FORWARDLEFT"));
 }
 
 
-void forwardleft() {
+void forwardright() {
   digitalWrite(LEFT_DIR, HIGH);
   analogWrite(LEFT_PWM, twoinputspeed);
   digitalWrite(RIGHT_DIR, HIGH);
   analogWrite(RIGHT_PWM, speed);
   Serial.println("forwardleft");
-  server.send(200, F("text/plain"), F("FORWARDLEFT"));
-}
-
-
-void backright() {
-  digitalWrite(LEFT_DIR, LOW);
-  analogWrite(LEFT_PWM, speed);
-  digitalWrite(RIGHT_DIR, LOW);
-  analogWrite(RIGHT_PWM, twoinputspeed * right_speed_modifier);
-  Serial.println("backright");
-  server.send(200, F("text/plain"), F("BACKRIGHT"));
+  server.send(200, F("text/plain"), F("FORWARDRIGHT"));
 }
 
 
 void backleft() {
   digitalWrite(LEFT_DIR, LOW);
-  analogWrite(LEFT_PWM, twoinputspeed);
+  analogWrite(LEFT_PWM, speed);
   digitalWrite(RIGHT_DIR, LOW);
-  analogWrite(RIGHT_PWM, speed * right_speed_modifier);
-  Serial.println("backleft");
+  analogWrite(RIGHT_PWM, twoinputspeed * right_speed_modifier);
+  Serial.println("backright");
   server.send(200, F("text/plain"), F("BACKLEFT"));
 }
 
 
-const char* classifyRock() {
-  // Categorise each sensor reading into discrete buckets
-  bool ir547 = (IRPulseRate > 400);    // true if IR is in 547 group
+void backright() {
+  digitalWrite(LEFT_DIR, LOW);
+  analogWrite(LEFT_PWM, twoinputspeed);
+  digitalWrite(RIGHT_DIR, LOW);
+  analogWrite(RIGHT_PWM, speed * right_speed_modifier);
+  Serial.println("backleft");
+  server.send(200, F("text/plain"), F("BACKRIGHT"));
+}
 
+
+const char* classifyRock() {
   // Match against the table
-  if ( ir547 && magDir == -1 || magDir == -1 &&  ultraDetected || ir547 && ultraDetected) return "basaltoid";
-  if (!ir547 && magDir == -1 || magDir == -1 && !ultraDetected || !ir547 && !ultraDetected) return "gravion";
-  if (!ir547 && magDir == 1 || magDir == 1 &&  ultraDetected || !ir547 && ultraDetected) return "regolix";
-  if ( ir547 && magDir == 1 || magDir == 1 && !ultraDetected || ir547 && !ultraDetected) return "lunarite";
+  if (IRstatus == 2 =  && magDir == -1 || magDir == -1 &&  ultraDetected || IRstatus == 2 && ultraDetected) return "basaltoid";
+  if (IRstatus == 1 && magDir == -1 || magDir == -1 && !ultraDetected || IRstatus == 1 && !ultraDetected) return "gravion";
+  if (IRstatus == 1 && magDir == 1 || magDir == 1 &&  ultraDetected || IRstatus == 1 && ultraDetected) return "regolix";
+  if (IRstatus == 2 && magDir == 1 || magDir == 1 && !ultraDetected || IRstatus == 2 && !ultraDetected) return "lunarite";
   return "unknown";
 }
 
@@ -785,7 +783,7 @@ void sendData() {
   json += "\"us\":"    + String(ultraDetected ? 1 : 0) + ",";  // ← bool not ADC
   json += "\"rock\":\"" + String(classifyRock()) + "\",";
   json += "\"age\":"   + rockAge;
-  json += "}";
+  json += "}";=
   Serial.println(json);
   server.send(200, F("application/json"), json);
 }
@@ -817,25 +815,23 @@ void handleNotFound() {
   server.send(404, F("text/plain"), message);
 }
 
-void pulseDetected() {
-  IRPulseCount++;
-}
 
 
 
-// Returns the LOGICAL state of the line: TRUE = idle, FALSE = active/start
+// Returns the LOGICAL state of the line:
+// TRUE = idle, FALSE = active/start
 inline bool lineIsIdle() {
   bool raw = digitalRead(RX_PIN);
   if (INVERTED) raw = !raw;
   return raw;
 }
 
-
-// Wait for a start bit, then sample 8 data bits. Returns the byte, or -1 on timeout.
+// Wait for a start bit, then sample 8 data bits. 
+// Returns the byte, or -1 on timeout.
 int readByte(unsigned long timeout_ms) {
   unsigned long deadline = millis() + timeout_ms;
   
-  // Ensure line is currently idle (don't jump into the middle of a byte)
+  // Ensure line is currently idle 
   while (!lineIsIdle()) {
     if (millis() > deadline) return -1;
   }
@@ -853,40 +849,21 @@ int readByte(unsigned long timeout_ms) {
   byte b = 0;
   for (int i = 0; i < 8; i++) {
     delayMicroseconds(BIT_PERIOD_US);
-    if (lineIsIdle()) b |= (1 << i);   // logical 1 = idle level
+    if (lineIsIdle()) b |= (1 << i);  
   }
   
-  // Wait through stop bit (not verified — start bit of next frame re-syncs)
+  // Wait through stop bit 
   delayMicroseconds(BIT_PERIOD_US);
   
   return b;
 }
 
-void updateIR() {
-  int elapsedTime = millis() - lastIRTime;
-  if (elapsedTime > IRSampleTime) {
-    // Atomically grab and reset the count
-    // noInterrupts();
-    int count = IRPulseCount;
-    IRPulseCount = 0;
-    // interrupts();
 
-    // pulses per second (×1000 because elapsedTime is in ms)
-    IRPulseRate = (float) count * 1000.0 / (float) elapsedTime;
-    // if (IRPulseRate > 1000) IRPulseRate = 0; // reject out of bounds values
-    lastIRTime = millis();
-  }
 
-  
-  Serial.print("IR: ");
-  Serial.println(IRPulseRate);
-}
+
 void updateUltra() {
   int elapsedTime = millis() - lastUltraTime;
-  digitalWrite(ULTRA_SWITCH, HIGH);
-  delay(10);
   ultraReading = analogRead(A1);
-  digitalWrite(ULTRA_SWITCH, LOW);
   if (elapsedTime > ultraSampleTime) {
     lastUltraTime = millis();
 
@@ -918,13 +895,14 @@ void updateMag() {
 
 }
 
+
 void updateRadio() {
-  // Wait for idle, then for a start bit
+  // Wait for idle
   unsigned long idleWait = millis() + 5;
   while (!lineIsIdle()) {
     if (millis() > idleWait) return;
   }
-
+  // wait for start bit
   unsigned long startWait = millis() + 50;
   while (lineIsIdle()) {
     if (millis() > startWait) return;
@@ -934,6 +912,7 @@ void updateRadio() {
   delayMicroseconds(HALF_BIT_US);
   if (lineIsIdle()) return;
 
+  // read 
   byte b = 0;
   for (int i = 0; i < 8; i++) {
     delayMicroseconds(BIT_PERIOD_US);
@@ -950,7 +929,6 @@ void updateRadio() {
   int z = readByte(200);
 
   if (x < 0 || y < 0 || z < 0) {
-    Serial.println("(timeout mid-frame)");
     return;
   }
 
@@ -960,17 +938,47 @@ void updateRadio() {
     tmp += String((char)y);
     tmp += String((char)z);
     rockAge = tmp;
-    Serial.print("Rock age = ");
-    Serial.print(rockAge);
-    Serial.println(" billion years");
-  } else {
-    Serial.println("(frame error)");
-  }
+
+  } 
 }
 
 
+void pulseDetected() {
+  IRPulseCount++;
+}
+
+void updateIR() {
+  int elapsedTime = millis() - lastIRTime;
+  if (elapsedTime > IRSampleTime) {
+    // Atomically grab and reset the count
+    // noInterrupts();
+    int count = IRPulseCount;
+    IRPulseCount = 0;
+    // interrupts();
+
+    // pulses per second (×1000 because elapsedTime is in ms)
+    IRPulseRate = (float) count * 1000.0 / (float) elapsedTime;
+    lastIRTime = millis();
+  }
+
+  if (IRPulseRate < 400 && IRPulseRate > 200) {
+    IRstatus = 1; // 312 
+  } else if (IRPulseRate < 650 && IRPulseRate > 450) {
+    IRstatus = 2; // 547
+  } else {
+    IRstatus = 0; // none
+  }
+
+}
 
 void setup() {
+
+  pinMode(IR_INPUT, INPUT);
+  attachInterrupt(digitalPinToInterrupt(IR_INPUT),
+                  pulseDetected,
+                  RISING);
+
+
   pinMode(ULTRA_SWITCH, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, 0);
@@ -983,10 +991,6 @@ void setup() {
 
   pinMode(RX_PIN, INPUT);
 
-  pinMode(IR_INPUT, INPUT);
-  attachInterrupt(digitalPinToInterrupt(IR_INPUT),
-                  pulseDetected,
-                  RISING);
 
   Serial.begin(115200);
 
@@ -1048,6 +1052,7 @@ void setup() {
 }
 
 //Call the server polling function in the main loop
+
 void loop() {
   // Drain all pending web requests for up to 20ms before doing anything else
   unsigned long serveUntil = millis() + 20;
@@ -1056,15 +1061,12 @@ void loop() {
   }
 
   updateIR();
-  // delay(100);
   updateUltra();
   updateMag();
-
-
 
   if (radioEnabled) {
     updateRadio();
   }
-
-
 }
+
+
